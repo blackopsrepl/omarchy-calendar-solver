@@ -8,7 +8,7 @@ mod solve;
 mod time;
 mod validation;
 
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 
 use error::{AppError, WireError};
 use protocol::{Request, Response};
@@ -51,9 +51,10 @@ fn main() {
 
 fn read_input() -> Result<Vec<u8>, AppError> {
     let mut input = Vec::new();
-    io::stdin()
-        .take((MAX_INPUT_BYTES + 1) as u64)
-        .read_to_end(&mut input)
+    let stdin = io::stdin();
+    let mut reader = io::BufReader::new(stdin.lock()).take((MAX_INPUT_BYTES + 1) as u64);
+    reader
+        .read_until(b'\n', &mut input)
         .map_err(|error| AppError::Internal(error.to_string()))?;
     if input.len() > MAX_INPUT_BYTES {
         Err(AppError::protocol(

@@ -170,6 +170,30 @@ fn dependencies_schedule_predecessor_before_dependent() {
 }
 
 #[test]
+fn applied_predecessor_blocks_dependent_until_its_event_ends() {
+    let mut applied = task("applied", 60, "normal", "low");
+    applied["state"] = json!("applied");
+    applied["linkedEventId"] = json!("applied-event");
+    let response = solve(request(
+        settings("09:00", "12:00"),
+        vec![applied, task("dependent", 30, "normal", "low")],
+        vec![event(
+            "applied-event",
+            "2026-09-04T09:00:00+02:00",
+            "2026-09-04T10:00:00+02:00",
+            "planner",
+            Some("applied"),
+        )],
+        vec![json!({"fromTaskId": "applied", "toTaskId": "dependent"})],
+    ));
+    let dependent = items(&response)
+        .iter()
+        .find(|item| item["taskId"] == "dependent")
+        .unwrap();
+    assert_eq!(dependent["startAt"], "2026-09-04T10:00:00+02:00");
+}
+
+#[test]
 fn hard_deadline_can_leave_a_task_unscheduled() {
     let mut hard_task = task("hard", 120, "high", "high");
     hard_task["deadlineKind"] = json!("hard");

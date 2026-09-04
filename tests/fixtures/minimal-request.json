@@ -1,0 +1,32 @@
+{
+  "protocolVersion": 1,
+  "requestId": "fixture-request",
+  "baseInputRevision": 7,
+  "now": "2026-09-04T08:00:00+02:00",
+  "settings": {
+    "timezone": "Europe/Rome",
+    "availability": {"friday": [{"start": "09:00", "end": "17:00"}]},
+    "horizonDays": 14,
+    "slotMinutes": 15,
+    "solveSeconds": 1,
+    "priorityLowWeight": 1,
+    "priorityNormalWeight": 5,
+    "priorityHighWeight": 25,
+    "cognitiveEnabled": false,
+    "lowWindowStart": "00:00",
+    "lowWindowEnd": "00:00",
+    "lowOutsidePenalty": 0,
+    "mediumWindowStart": "00:00",
+    "mediumWindowEnd": "00:00",
+    "mediumOutsidePenalty": 0,
+    "highWindowStart": "00:00",
+    "highWindowEnd": "00:00",
+    "highOutsidePenalty": 0,
+    "highStreakLimit": 1,
+    "recoveryMinutes": 30,
+    "excessHighPenalty": 60
+  },
+  "events": [],
+  "tasks": [],
+  "dependencies": []
+}

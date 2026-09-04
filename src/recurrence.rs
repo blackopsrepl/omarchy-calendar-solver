@@ -62,6 +62,16 @@ pub fn expand_events(
         let rule = RRule::<Unvalidated>::from_str(rule_text).map_err(|error| {
             AppError::recurrence("invalid_rrule", format!("{path}.rrule"), error.to_string())
         })?;
+        if rule
+            .get_count()
+            .is_some_and(|count| count > u32::from(RECURRENCE_LIMIT))
+        {
+            return Err(AppError::recurrence(
+                "recurrence_limit",
+                format!("{path}.rrule"),
+                format!("recurrence expansion exceeded {RECURRENCE_LIMIT} occurrences"),
+            ));
+        }
         let recurrence_timezone: rrule::Tz = timezone.into();
         let recurrence_start = start.with_timezone(&recurrence_timezone);
         let set = rule.build(recurrence_start).map_err(|error| {

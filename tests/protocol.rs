@@ -1,4 +1,5 @@
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -76,6 +77,39 @@ fn valid_request_has_one_response_and_echoes_request_id() {
     let response = response(&output);
     assert_eq!(response["ok"], true);
     assert_eq!(response["requestId"], "protocol-test");
+}
+
+#[test]
+fn newline_terminated_request_does_not_wait_for_stdin_eof() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_omarchy-calendar-solver"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("solver process should start");
+    let mut stdin = child
+        .stdin
+        .take()
+        .expect("solver stdin should be available");
+    use std::io::Write;
+    writeln!(stdin, "{}", serde_json::to_string(&request()).unwrap()).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("solver waited for stdin EOF after receiving a request line");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.stderr.is_empty());
+    assert_eq!(response(&output)["requestId"], "protocol-test");
 }
 
 #[test]

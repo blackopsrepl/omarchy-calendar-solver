@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::domain::{score, SolverFixedTask, SolverPlan, SolverSlot, SolverTask};
 use crate::error::AppError;
 use crate::model::{
-    CognitiveLoad, DeadlineKind, DiagnosticOutcome, Priority, Proposal, ProposalDiagnostics,
-    ProposalItem, Score, Settings, Task, TaskState,
+    CognitiveLoad, DeadlineKind, Dependency, DiagnosticOutcome, Priority, Proposal,
+    ProposalDiagnostics, ProposalItem, Score, Settings, Task, TaskState,
 };
 use crate::protocol::Request;
 use crate::recurrence::{expand_events, BusyInterval};
@@ -99,11 +99,22 @@ fn prepare(request: &Request) -> Result<PreparedProblem, AppError> {
         )
     });
     let fixed_tasks = build_fixed_tasks(request, &horizon);
+    let fixed_end_by_task_id: HashMap<_, _> = fixed_tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task.end_minute))
+        .collect();
     let mut candidates = BTreeMap::new();
     let mut busy_blockers = BTreeMap::new();
     for task in &inbox_tasks {
-        let (task_candidates, blockers) =
-            build_candidates(task, &request.settings, &horizon, &slots, &busy)?;
+        let (task_candidates, blockers) = build_candidates(
+            task,
+            &request.settings,
+            &horizon,
+            &slots,
+            &busy,
+            &request.dependencies,
+            &fixed_end_by_task_id,
+        )?;
         candidates.insert(task.id.clone(), task_candidates);
         busy_blockers.insert(task.id.clone(), blockers);
     }
@@ -123,8 +134,8 @@ fn build_slots(settings: &Settings, horizon: &PlanningHorizon) -> Vec<Slot> {
     let end = horizon.end.with_timezone(&Utc);
     while cursor < end {
         let local = cursor.with_timezone(&horizon.timezone);
-        if local.minute().is_multiple_of(settings.slot_minutes) && is_available_at(settings, local)
-        {
+        let local_minute = local.hour() * 60 + local.minute();
+        if local_minute.is_multiple_of(settings.slot_minutes) && is_available_at(settings, local) {
             let local_end = local + Duration::minutes(i64::from(settings.slot_minutes));
             slots.push(Slot {
                 id: slots.len(),
@@ -143,6 +154,8 @@ fn build_candidates(
     horizon: &PlanningHorizon,
     slots: &[Slot],
     busy: &[BusyInterval],
+    dependencies: &[Dependency],
+    fixed_end_by_task_id: &HashMap<&str, i64>,
 ) -> Result<(Vec<Candidate>, Vec<String>), AppError> {
     let earliest = match task.earliest_at.as_deref() {
         Some(value) => Some(
@@ -159,12 +172,21 @@ fn build_candidates(
         None => None,
     };
     let duration = Duration::minutes(i64::from(task.duration_minutes));
+    let predecessor_fixed_end = dependencies
+        .iter()
+        .filter(|dependency| dependency.to_task_id == task.id)
+        .filter_map(|dependency| fixed_end_by_task_id.get(dependency.from_task_id.as_str()))
+        .copied()
+        .max();
     let mut candidates = Vec::new();
     let mut blockers = Vec::new();
     for slot in slots {
         let start = slot.start;
         let end = start + duration;
         if start < horizon.now || end > horizon.end {
+            continue;
+        }
+        if predecessor_fixed_end.is_some_and(|value| start.timestamp().div_euclid(60) < value) {
             continue;
         }
         if earliest.is_some_and(|value| start < value) {
@@ -400,6 +422,16 @@ fn greedy_fallback(mut plan: SolverPlan, problem: &PreparedProblem) -> SolverPla
         let Some(candidates) = problem.candidates.get(&task_id) else {
             continue;
         };
+        let predecessors_assigned = predecessor_ids.iter().all(|predecessor_id| {
+            plan.tasks
+                .iter()
+                .find(|candidate| &candidate.id == predecessor_id)
+                .and_then(|predecessor| predecessor.slot_id)
+                .is_some()
+        });
+        if !predecessors_assigned {
+            continue;
+        }
         let mut choices = candidates.clone();
         choices.sort_by_key(|candidate| {
             (

@@ -3,7 +3,7 @@ name = "omarchy-calendar-solver"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.95"
-license = "Apache-2.0"
+license = "MIT"
 description = "Internal one-shot scheduling adapter for Omarchy"
 repository = "https://github.com/blackopsrepl/omarchy-calendar-solver"
 
