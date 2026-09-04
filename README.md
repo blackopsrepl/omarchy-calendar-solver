@@ -10,6 +10,13 @@ wire DTOs separate from its SolverForge planning model. The request supplies
 the current time, settings, events, tasks, and dependencies; the response is a
 proposal that Omarchy may apply explicitly.
 
+## Third-party software
+
+This adapter incorporates [SolverForge](https://github.com/SolverForge/solverforge)
+`0.19.4`, licensed under the Apache License, Version 2.0. The corresponding
+license text is included in `LICENSES/SolverForge-Apache-2.0.txt` and is
+installed with the package alongside this adapter's MIT license.
+
 ## Development
 
 ```sh
