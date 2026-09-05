@@ -48,37 +48,9 @@ pub fn solve(request: &Request) -> Result<Proposal, AppError> {
     let solved = if plan.tasks.is_empty() {
         plan
     } else {
-        let greedy = greedy_fallback(plan.clone(), &problem);
-        let solved = run_solver(plan.clone(), request.settings.solve_seconds)?;
-        if score(&solved).hard() < 0 || is_better(&greedy, &solved) {
-            greedy
-        } else {
-            solved
-        }
+        run_solver(plan, request.settings.solve_seconds)?
     };
     Ok(make_proposal(request, &problem, &solved))
-}
-
-fn is_better(left: &SolverPlan, right: &SolverPlan) -> bool {
-    let left_score = score(left);
-    let right_score = score(right);
-    let left_scheduled = left
-        .tasks
-        .iter()
-        .filter(|task| task.slot_id.is_some())
-        .count();
-    let right_scheduled = right
-        .tasks
-        .iter()
-        .filter(|task| task.slot_id.is_some())
-        .count();
-    left_score.hard() > right_score.hard()
-        || (left_score.hard() == right_score.hard()
-            && (left_scheduled > right_scheduled
-                || (left_scheduled == right_scheduled
-                    && (left_score.medium() > right_score.medium()
-                        || (left_score.medium() == right_score.medium()
-                            && left_score.soft() > right_score.soft())))))
 }
 
 fn prepare(request: &Request) -> Result<PreparedProblem, AppError> {
@@ -307,6 +279,7 @@ fn build_fixed_tasks(request: &Request, horizon: &PlanningHorizon) -> Vec<Solver
 
 fn make_plan(request: &Request, problem: &PreparedProblem) -> SolverPlan {
     let predecessor_map = predecessor_map(&request.dependencies);
+    let dependency_depths = dependency_depths(&problem.inbox_tasks, &predecessor_map);
     let tasks = problem
         .inbox_tasks
         .iter()
@@ -341,6 +314,7 @@ fn make_plan(request: &Request, problem: &PreparedProblem) -> SolverPlan {
                 recovery_penalty: request.settings.excess_high_penalty,
                 high_cognitive_load: task.cognitive_load == CognitiveLoad::High,
                 predecessor_ids: predecessor_map.get(&task.id).cloned().unwrap_or_default(),
+                dependency_depth: dependency_depths.get(&task.id).copied().unwrap_or_default(),
                 feasible_slot_ids: candidates
                     .iter()
                     .map(|candidate| candidate.slot.id)
@@ -364,6 +338,42 @@ fn make_plan(request: &Request, problem: &PreparedProblem) -> SolverPlan {
         score: None,
         solve_seconds: u64::from(request.settings.solve_seconds),
     }
+}
+
+fn dependency_depths(
+    tasks: &[Task],
+    predecessor_map: &HashMap<String, Vec<String>>,
+) -> HashMap<String, i64> {
+    fn depth(
+        task_id: &str,
+        predecessor_map: &HashMap<String, Vec<String>>,
+        memo: &mut HashMap<String, i64>,
+        visiting: &mut HashSet<String>,
+    ) -> i64 {
+        if let Some(value) = memo.get(task_id) {
+            return *value;
+        }
+        if !visiting.insert(task_id.to_string()) {
+            return 0;
+        }
+        let value = predecessor_map
+            .get(task_id)
+            .into_iter()
+            .flatten()
+            .map(|predecessor| depth(predecessor, predecessor_map, memo, visiting) + 1)
+            .max()
+            .unwrap_or(0);
+        visiting.remove(task_id);
+        memo.insert(task_id.to_string(), value);
+        value
+    }
+
+    let mut memo = HashMap::new();
+    let mut visiting = HashSet::new();
+    for task in tasks {
+        depth(&task.id, predecessor_map, &mut memo, &mut visiting);
+    }
+    memo
 }
 
 fn predecessor_map(dependencies: &[crate::model::Dependency]) -> HashMap<String, Vec<String>> {
@@ -409,108 +419,6 @@ fn run_solver(plan: SolverPlan, _solve_seconds: u32) -> Result<SolverPlan, AppEr
     let _ = manager.delete(job_id);
     completed
         .ok_or_else(|| AppError::Internal("solver ended without a completed solution".to_string()))
-}
-
-fn greedy_fallback(mut plan: SolverPlan, problem: &PreparedProblem) -> SolverPlan {
-    let order = dependency_order(&plan.tasks);
-    let mut assignments: Vec<(i64, i64, bool)> = Vec::new();
-    for index in order {
-        let task_id = plan.tasks[index].id.clone();
-        let task_duration = plan.tasks[index].duration_minutes;
-        let task_high = plan.tasks[index].high_cognitive_load;
-        let predecessor_ids = plan.tasks[index].predecessor_ids.clone();
-        let Some(candidates) = problem.candidates.get(&task_id) else {
-            continue;
-        };
-        let predecessors_assigned = predecessor_ids.iter().all(|predecessor_id| {
-            plan.tasks
-                .iter()
-                .find(|candidate| &candidate.id == predecessor_id)
-                .and_then(|predecessor| predecessor.slot_id)
-                .is_some()
-        });
-        if !predecessors_assigned {
-            continue;
-        }
-        let mut choices = candidates.clone();
-        choices.sort_by_key(|candidate| {
-            (
-                candidate.soft_deadline_penalty,
-                candidate.cognitive_penalty,
-                candidate.slot.start,
-            )
-        });
-        let predecessor_end = predecessor_ids
-            .iter()
-            .filter_map(|id| plan.tasks.iter().find(|candidate| &candidate.id == id))
-            .filter_map(|predecessor| {
-                predecessor.slot_id.and_then(|slot| {
-                    predecessor
-                        .start_minute_by_slot
-                        .get(&slot)
-                        .copied()
-                        .map(|start| start + predecessor.duration_minutes)
-                })
-            })
-            .max();
-        if let Some(candidate) = choices.into_iter().find(|candidate| {
-            let start = candidate.slot.start.timestamp().div_euclid(60);
-            let end = start + task_duration;
-            predecessor_end.is_none_or(|value| start >= value)
-                && assignments
-                    .iter()
-                    .all(|(other_start, other_end, _)| start >= *other_end || *other_start >= end)
-        }) {
-            let start = candidate.slot.start.timestamp().div_euclid(60);
-            let end = start + task_duration;
-            plan.tasks[index].slot_id = Some(candidate.slot.id);
-            assignments.push((start, end, task_high));
-        }
-    }
-    plan.score = Some(score(&plan));
-    plan
-}
-
-fn dependency_order(tasks: &[SolverTask]) -> Vec<usize> {
-    let mut by_id = HashMap::new();
-    for (index, task) in tasks.iter().enumerate() {
-        by_id.insert(task.id.as_str(), index);
-    }
-    let mut order = Vec::new();
-    let mut visiting = HashSet::new();
-    let mut visited = HashSet::new();
-    for index in 0..tasks.len() {
-        visit(
-            index,
-            tasks,
-            &by_id,
-            &mut visiting,
-            &mut visited,
-            &mut order,
-        );
-    }
-    order
-}
-
-fn visit(
-    index: usize,
-    tasks: &[SolverTask],
-    by_id: &HashMap<&str, usize>,
-    visiting: &mut HashSet<usize>,
-    visited: &mut HashSet<usize>,
-    order: &mut Vec<usize>,
-) {
-    if visited.contains(&index) || !visiting.insert(index) {
-        return;
-    }
-    for predecessor in &tasks[index].predecessor_ids {
-        if let Some(&predecessor_index) = by_id.get(predecessor.as_str()) {
-            visit(predecessor_index, tasks, by_id, visiting, visited, order);
-        }
-    }
-    visiting.remove(&index);
-    visited.insert(index);
-    order.push(index);
 }
 
 fn make_proposal(request: &Request, problem: &PreparedProblem, plan: &SolverPlan) -> Proposal {

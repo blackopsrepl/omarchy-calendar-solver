@@ -1,3 +1,15 @@
 [[phases]]
 type = "construction_heuristic"
-construction_heuristic_type = "first_fit"
+construction_heuristic_type = "first_fit_decreasing"
+
+[[phases]]
+type = "local_search"
+[phases.acceptor]
+type = "late_acceptance"
+late_acceptance_size = 400
+[phases.forager]
+type = "accepted_count"
+limit = 4
+
+[termination]
+seconds_spent_limit = 30
