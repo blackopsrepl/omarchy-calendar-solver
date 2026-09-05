@@ -28,16 +28,14 @@ Human diagnostics are written to stderr. Exit status `0` means a valid response
 was produced, `2` means the request was malformed or invalid, and `1` means an
 internal or solver failure.
 
-## Reference audit
+## SolverForge model
 
-The inspected `solverforge-calendar` reference was pinned at commit
-`d37ed0a726c4c69f78b7b917ec73459ed955b758`. That checkout contains the older
-TUI/SQLite/Google application, but does not contain the planner source paths or
-`planner-solver.toml` named by the integration brief. This adapter therefore
-records the missing reference as an integration gap; its checked-in
-`planner-solver.toml` currently provides the documented `first_fit`
-construction phase and must be replaced with the exact reference phase file
-when that source becomes available.
+Each inbox task is a SolverForge planning entity. Its scalar planning variable
+selects one of that task's prepared calendar slots through a SolverForge
+candidate-values hook. SolverForge's native `first_fit_decreasing`
+construction phase places dependency roots before dependents, and its native
+local-search phase improves the complete assignment against the hard, medium,
+and soft constraints in the planning model.
 
 The behavior implemented here is intentionally local and deterministic around
 the supplied `now`: IANA timezone conversion, local-day horizons, availability
