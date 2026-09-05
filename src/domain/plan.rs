@@ -168,3 +168,23 @@ fn constraints() -> impl ConstraintSet<SolverPlan, HardMediumSoftScore> {
 pub fn score(plan: &SolverPlan) -> HardMediumSoftScore {
     constraints().evaluate_all(plan)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_variable_uses_solverforge_candidate_and_order_hooks() {
+        let descriptor = SolverPlan::descriptor();
+        let task_descriptor = descriptor
+            .find_entity_descriptor("SolverTask")
+            .expect("SolverTask descriptor should exist");
+        let variable = task_descriptor
+            .find_variable("slot_id")
+            .expect("slot_id variable should exist");
+
+        assert_eq!(variable.value_range_provider, Some("slots"));
+        assert!(variable.candidate_values.is_some());
+        assert!(variable.construction_entity_order_key.is_some());
+    }
+}

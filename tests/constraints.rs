@@ -216,8 +216,10 @@ fn applied_high_load_task_contributes_recovery_penalty() {
     let mut applied = task("applied", 60, "high", "high");
     applied["state"] = json!("applied");
     applied["linkedEventId"] = json!("applied-event");
+    let mut constrained_settings = settings("09:00", "11:00");
+    constrained_settings["horizonDays"] = json!(1);
     let response = solve(request(
-        settings("09:00", "12:00"),
+        constrained_settings,
         vec![applied, task("next", 60, "high", "high")],
         vec![event(
             "applied-event",
